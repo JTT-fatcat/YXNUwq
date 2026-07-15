@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高级学术报告 - 空间数据可视化系统</title>
+    <!-- 引入 Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #34495e;
+            --accent: #3498db;
+            --danger: #e74c3c;
+            --bg: #ecf0f1;
+        }
+        body, html {
+            margin: 0; padding: 0; height: 100%;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+        /* 顶部导航 */
+        header {
+            background-color: var(--primary); color: white;
+            padding: 10px 20px; display: flex;
+            justify-content: space-between; align-items: center;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 1000;
+        }
+        header h1 { margin: 0; font-size: 18px; letter-spacing: 1px; }
+        .header-btns button {
+            background: #27ae60; color: white; border: none;
+            padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 10px;
+        }
+        .header-btns button.clear { background: var(--danger); }
+        
+        /* 主体布局 */
+        #main-container {
+            display: flex; height: calc(100% - 45px); width: 100%;
+        }
+        
+        /* 左侧控制面板 */
+        #sidebar {
+            width: 320px; background: white; box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; z-index: 999;
+        }
+        .panel-section { padding: 15px; border-bottom: 1px solid #ddd; }
+        .panel-section h3 { margin: 0 0 10px 0; font-size: 15px; color: var(--secondary); }
+        
+        /* 表单样式 */
+        .form-group { margin-bottom: 10px; display: flex; align-items: center; }
+        .form-group label { width: 70px; font-size: 13px; color: #555; }
+        .form-group input[type="text"], .form-group input[type="number"] {
+            flex: 1; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px;
+        }
+        .form-group input[type="color"] { width: 40px; height: 26px; padding: 0; border: none; cursor: pointer; }
+        .form-group input[type="range"] { flex: 1; }
+        .add-btn {
+            width: 100%; padding: 8px; background: var(--accent); color: white;
+            border: none; border-radius: 4px; cursor: pointer; font-weight: bold;
+            margin-top: 5px; transition: 0.2s;
+        }
+        .add-btn:hover { background: #2980b9; }
+
+        /* 数据列表 */
+        #data-list-container { flex: 1; overflow-y: auto; padding: 0; margin: 0; list-style: none; background: var(--bg); }
+        .data-item {
+            background: white; margin: 5px 10px; padding: 10px; border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1); cursor: pointer; border-left: 4px solid #333;
+            transition: 0.2s;
+        }
+        .data-item:hover { transform: translateY(-1px); box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+        .data-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .data-item-title { font-weight: bold; font-size: 14px; }
+        .data-item-coords { font-size: 12px; color: #7f8c8d; }
+        .del-btn { background: none; border: none; color: var(--danger); cursor: pointer; font-size: 16px; padding: 0; }
+        .del-btn:hover { font-weight: bold; }
+
+        /* 地图容器 */
+        #map { flex: 1; height: 100%; }
+        
+        /* 提示字 */
+        .map-hint { font-size: 12px; color: #888; margin-top: 5px; display: block; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>科研空间数据可视化工程面板</h1>
+        <div class="header-btns">
+            <button onclick="exportToCSV()" title="导出为Excel可用的CSV文件">↓ 导出数据(CSV)</button>
+            <button class="clear" onclick="clearAll()">清空全部</button>
+        </div>
+    </header>
+
+    <div id="main-container">
+        <!-- 左侧面板 -->
+        <div id="sidebar">
+            <div class="panel-section">
+                <h3>添加斑点 (自动/手动)</h3>
+                <span class="map-hint">💡 在右侧地图点击，可自动获取坐标</span>
+                <div class="form-group" style="margin-top:10px;">
+                    <label>点位名称</label>
+                    <input type="text" id="point-name" placeholder="例如: 采样点A" value="未命名点位">
+                </div>
+                <div class="form-group">
+                    <label>纬度(Lat)</label>
+                    <input type="number" id="point-lat" step="0.000001" placeholder="输入纬度">
+                </div>
+                <div class="form-group">
+                    <label>经度(Lng)</label>
+                    <input type="number" id="point-lng" step="0.000001" placeholder="输入经度">
+                </div>
+                <div class="form-group">
+                    <label>斑点颜色</label>
+                    <input type="color" id="point-color" value="#ff0000">
+                    <span style="margin-left: 10px; font-size: 12px; color:#555;">(默认红色)</span>
+                </div>
+                <div class="form-group">
+                    <label>影响半径</label>
+                    <input type="range" id="point-radius" min="5" max="50" value="15">
+                    <span id="radius-val" style="font-size: 12px; width: 20px; text-align: right;">15</span>
+                </div>
+                <button class="add-btn" onclick="addPointFromForm()">生成/保存斑点</button>
+            </div>
+            
+            <div class="panel-section" style="padding-bottom: 5px; border-bottom: none;">
+                <h3>已保存数据列表 (<span id="count">0</span>)</h3>
+            </div>
+            <ul id="data-list-container">
+                <!-- 数据列表动态生成在这里 -->
+            </ul>
+        </div>
+
+        <!-- 地图容器 -->
+        <div id="map"></div>
+    </div>
+
+    <!-- 引入 Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // --- 1. 地图初始化 ---
+        const map = L.map('map').setView([35.8617, 104.1954], 4);
+        
+        // 使用学术风格底图 (CartoDB)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 18, minZoom: 3
+        }).addTo(map);
+
+        // 添加比例尺 (工程必备)
+        L.control.scale({ imperial: false, metric: true, position: 'bottomright' }).addTo(map);
+
+        // --- 2. 状态管理 ---
+        let spotsData = JSON.parse(localStorage.getItem('academic_spots')) || [];
+        const spotsLayer = L.layerGroup().addTo(map);
+
+        // --- 3. UI 交互逻辑 ---
+        // 监听半径滑动条
+        document.getElementById('point-radius').addEventListener('input', function(e) {
+            document.getElementById('radius-val').innerText = e.target.value;
+        });
+
+        // 监听地图点击 -> 自动填入坐标
+        map.on('click', function(e) {
+            document.getElementById('point-lat').value = e.latlng.lat.toFixed(6);
+            document.getElementById('point-lng').value = e.latlng.lng.toFixed(6);
+            // 选完坐标自动让名字输入框获得焦点，提升输入效率
+            document.getElementById('point-name').focus();
+            document.getElementById('point-name').select();
+        });
+
+        // --- 4. 核心功能：添加斑点 ---
+        function addPointFromForm() {
+            const name = document.getElementById('point-name').value || '未命名';
+            const lat = parseFloat(document.getElementById('point-lat').value);
+            const lng = parseFloat(document.getElementById('point-lng').value);
+            const color = document.getElementById('point-color').value;
+            const radius = parseInt(document.getElementById('point-radius').value);
+
+            if (isNaN(lat) || isNaN(lng)) {
+                alert("请先在地图上点击获取坐标，或手动输入正确的经纬度！");
+                return;
+            }
+
+            const spot = {
+                id: Date.now().toString(), // 唯一ID，用于删除
+                name: name,
+                lat: lat,
+                lng: lng,
+                color: color,
+                radius: radius
+            };
+
+            spotsData.push(spot);
+            saveData();
+            renderAll();
+        }
+
+        // --- 5. 渲染与绘制 ---
+        function renderAll() {
+            // 清空现有图层和列表
+            spotsLayer.clearLayers();
+            const listContainer = document.getElementById('data-list-container');
+            listContainer.innerHTML = '';
+            document.getElementById('count').innerText = spotsData.length;
+
+            spotsData.forEach(spot => {
+                // 绘制地图斑点 (CircleMarker 适合工程表示影响范围或热点)
+                const circle = L.circleMarker([spot.lat, spot.lng], {
+                    radius: spot.radius,
+                    fillColor: spot.color,
+                    color: spot.color, // 边框颜色与填充相同
+                    weight: 1,
+                    opacity: 0.8,
+                    fillOpacity: 0.5 // 半透明效果，多个点叠加时会有类似热力图的效果
+                }).addTo(spotsLayer);
+
+                // 绑定Hover时的文字提示
+                circle.bindTooltip(spot.name, { permanent: false, direction: 'top' });
+                // 绑定点击时的详情弹窗
+                circle.bindPopup(`
+                    <div style="font-size:14px;">
+                        <b>${spot.name}</b><br>
+                        纬度: ${spot.lat.toFixed(4)}<br>
+                        经度: ${spot.lng.toFixed(4)}<br>
+                        半径: ${spot.radius} px
+                    </div>
+                `);
+
+                // 渲染左侧列表
+                const li = document.createElement('li');
+                li.className = 'data-item';
+                li.style.borderLeftColor = spot.color;
+                li.innerHTML = `
+                    <div class="data-item-header">
+                        <span class="data-item-title">${spot.name}</span>
+                        <button class="del-btn" title="删除此点" onclick="deleteSpot('${spot.id}', event)">×</button>
+                    </div>
+                    <div class="data-item-coords">Lat: ${spot.lat.toFixed(4)}, Lng: ${spot.lng.toFixed(4)}</div>
+                `;
+                // 点击列表项，地图飞越定位到该点
+                li.onclick = () => flyToSpot(spot.lat, spot.lng);
+                listContainer.appendChild(li);
+            });
+        }
+
+        // --- 6. 辅助功能 ---
+        function flyToSpot(lat, lng) {
+            map.flyTo([lat, lng], 8, { duration: 1 });
+        }
+
+        function deleteSpot(id, event) {
+            event.stopPropagation(); // 阻止触发飞越事件
+            spotsData = spotsData.filter(s => s.id !== id);
+            saveData();
+            renderAll();
+        }
+
+        function clearAll() {
+            if(confirm("确定清空所有工程数据吗？")) {
+                spotsData = [];
+                saveData();
+                renderAll();
+            }
+        }
+
+        function saveData() {
+            localStorage.setItem('academic_spots', JSON.stringify(spotsData));
+        }
+
+        // 高级工程功能：导出数据为 CSV
+        function exportToCSV() {
+            if(spotsData.length === 0) { alert("没有可导出的数据"); return; }
+            
+            // CSV 表头
+            let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; // 加入 BOM 防止中文乱码
+            csvContent += "ID,名称,纬度(Lat),经度(Lng),颜色(HEX),半径\n";
+            
+            // 数据行
+            spotsData.forEach(spot => {
+                const row = `${spot.id},"${spot.name}",${spot.lat},${spot.lng},${spot.color},${spot.radius}`;
+                csvContent += row + "\n";
+            });
+
+            // 触发下载
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `空间标点数据_${new Date().toISOString().slice(0,10)}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // 初始化执行渲染
+        window.onload = renderAll;
+    </script>
+</body>
+</html>
